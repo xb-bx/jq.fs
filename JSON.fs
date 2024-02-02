@@ -36,6 +36,8 @@ module JSON =
     let jstring: Parser<JValue, unit> = pString |>> JString
     let word (str: string): Parser<string,unit> = 
         ws >>. pstring str .>> ws 
+    let jnull: Parser<JValue, unit> = 
+        word "null" >>% JNull
     let jbool: Parser<JValue, unit> =
         (word "true" >>% JBool true) <|> (word "false" >>% JBool false)
     let jvalue, jvalueRef = createParserForwardedToRef()
@@ -53,4 +55,5 @@ module JSON =
             jbool;
             jarray; 
             jobject;
+            jnull;
         ] .>> ws
