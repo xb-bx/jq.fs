@@ -1,74 +1,101 @@
-﻿open FParsec
-open JQ.JSON
+﻿module JQMain
+
+open FParsec
 open System
+open JSON
+open JQ
 
-let tuppled f x =
-    f (fst x) (snd x)
+let jsonToString (jv: JValue) : (string * (ConsoleColor option)) list =
+    let indentation indentLvl = String.replicate indentLvl
 
-let jsonToString (jv: JValue): (string * (ConsoleColor option)) list =
-    let indentation indentLvl = 
-        String.replicate indentLvl
-    let rec jsonToString' (indentLvl: int) (postfix: string) jv : (string * (ConsoleColor option)) list   = 
-        let indent indentLvl s = (indentation indentLvl "  ") + s 
-        let colored  (color: ConsoleColor option) (indentLvl) (s: string): string * ConsoleColor option  = (indent indentLvl s), color
+    let listMapAllMapLast fall flast xs =
+        let rec loop xs acc =
+            match xs with
+            | [] -> acc
+            | head :: [] -> acc @ [ flast head ]  
+            | head :: tail -> loop tail (acc @ [ fall head ])
+
+        loop xs []
+
+    let rec jsonToString' (indentLvl: int) (postfix: string) jv : (string * (ConsoleColor option)) list =
+        let indent indentLvl s = (indentation indentLvl "  ") + s
+
+        let colored (color: ConsoleColor option) (indentLvl: int) (s: string) : string * ConsoleColor option =
+            (indent indentLvl s), color
+
         let default' = colored None
         let green = ConsoleColor.Green |> Some |> colored
         let blue = ConsoleColor.Blue |> Some |> colored
-        let field indentLvl name value  =
-            let name = name |> sprintf "\"%s\": " |> blue indentLvl
-            let head :: tail = jsonToString' indentLvl "" value
-            let fld = [(((head |> fst).TrimStart()), head |> snd)] @ tail 
-            [name] @ fld
-    
 
         match jv with
-        | JNull -> [default' indentLvl ("null" + postfix)]
-        | JNumber num -> [ default' (indentLvl) ((num.ToString()) + postfix) ]
-        | JBool true -> [ default' (indentLvl)("true" + postfix) ]
-        | JBool false -> [ default' (indentLvl)("false" + postfix) ]
-        | JString str -> [ green (indentLvl) (("\"" + str + "\"") + postfix) ]
-        | JArray arr -> 
-            let joined = (arr |> List.mapi (fun i -> (jsonToString' (indentLvl + 1) (if i = (List.length arr - 1) then "\n" else ",\n"))) |> List.concat)
-            [[ default' (indentLvl) "[\n" ]; joined; [ default' (indentLvl) ("]" + postfix)]] |> List.concat
-        | JObject o ->
-            let fields = o |> Map.toList |> List.map (tuppled (field (indentLvl + 1)))
-            let len = List.length fields
-            let rec replaceTail f x =
-                match x with 
-                | head :: [] -> [f head]
-                | head :: tail ->  [head] @ replaceTail f tail
-                | _ -> []
-            
-            let fieldStrings = fields |> List.mapi (
-                fun i x -> 
-                    if i = len - 1 then 
-                        (replaceTail (fun (str, color) -> (str + "\n", color)) x)
-                    else 
-                        (replaceTail (fun (str, color) -> (str + ",\n", color)) x)
-                )
-            let fieldStrings = fieldStrings |> List.concat
-            ([default' indentLvl "{\n"]) @ fieldStrings @ ([default' indentLvl ("}" + postfix)])
-            (*[default' "{\n"; fieldStrings |> List.concat*)
+        | JNull -> [ default' indentLvl ("null" + postfix) ]
+        | JNumber num -> [ default' indentLvl ((num.ToString()) + postfix) ]
+        | JBool true -> [ default' indentLvl ("true" + postfix) ]
+        | JBool false -> [ default' indentLvl ("false" + postfix) ]
+        | JString str -> [ green indentLvl (("\"" + str + "\"") + postfix) ]
+        | JArray [] -> [ default' indentLvl ("[]" + postfix) ]
+        | JArray arr ->
+            [ [ default' indentLvl "[\n" ]
+              (arr
+               |> listMapAllMapLast (jsonToString' (indentLvl + 1) ",\n") (jsonToString' (indentLvl + 1) "\n")
+               |> List.concat)
+              [ default' indentLvl ("]" + postfix) ] ]
+            |> List.concat
+        | JObject fields ->
+            let field postfix indentLvl (name, value) : (string * (ConsoleColor option)) list =
+                let head :: tail = jsonToString' (indentLvl) postfix value
+                let valueList = [ ((fst head).TrimStart()), snd head ] @ tail
+                [ ("\"" + name + "\": ") |> blue indentLvl ] @ valueList
+
+            let fieldsList =
+                fields
+                |> Map.toList
+                |> listMapAllMapLast (field ",\n" (indentLvl + 1)) (field "\n" (indentLvl + 1))
+                |> List.concat
+
+            [ [ default' indentLvl "{\n" ]
+              fieldsList
+              [ default' indentLvl ("}" + postfix) ] ]
+            |> List.concat
 
 
-            
-            
-            
+
+
     jsonToString' 0 "" jv
 
-let str = System.Console.In.ReadToEnd()
-let res = run jvalue str 
-let decolorize ((s, col)) =
-    s, None
-let printColored ((s, col) : string * ConsoleColor option) =
+let getSuccess p =
+    match p with
+    | Success(x, _, _) -> x
+
+let identifier name next = Identifier(name, next)
+let selectFromArray from selec = SelectFromArray(from, selec)
+let index i next = ArrayElement(i, next)
+
+let printColored ((s, col): string * ConsoleColor option) =
     match col with
     | Some(c) -> Console.ForegroundColor <- c
     | None -> Console.ResetColor()
+
     Console.Write(s)
-let dump o = 
-    printfn "%A" o
-    o
-match res with 
-| Success (objec, _, _) -> objec |> jsonToString |> dump |> List.iter printColored
 
+type JQErrors =
+    | JQError of JQError
+    | JsonError of ParserError
 
+let parserResultToResult pr =
+    match pr with
+    | Success(x, _, _) -> Result.Ok x
+    | Failure(_, p, _) -> p |> JsonError |> Result.Error
+
+[<EntryPoint>]
+let main _ =
+    let str = System.Console.In.ReadToEnd()
+    let res = run jvalue str
+
+    res
+    |> parserResultToResult
+    |> Result.iter (jsonToString >> (List.iter printColored))
+
+    0
+(*printfn "%A" objec*)
+(*objec |> jsonToString |> List.iter printColored*)
