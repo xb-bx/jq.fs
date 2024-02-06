@@ -4,6 +4,7 @@ open FParsec
 open System
 open JSON
 open JQ
+open JQParser
 
 let jsonToString (jv: JValue) : (string * (ConsoleColor option)) list =
     let indentation indentLvl = String.replicate indentLvl
@@ -88,13 +89,22 @@ let parserResultToResult pr =
     | Failure(_, p, _) -> p |> JsonError |> Result.Error
 
 [<EntryPoint>]
-let main _ =
+let main args =
     let str = System.Console.In.ReadToEnd()
     let res = run jvalue str
 
     res
     |> parserResultToResult
     |> Result.iter (jsonToString >> (List.iter printColored))
+    let jobj = res |> parserResultToResult |> Result.defaultValue (JNull)
+
+    printfn ""
+
+    run selector args[0]
+    |> parserResultToResult 
+    |> Result.bind (fun selec -> (evaluateSelector selec (Single jobj) |> Result.mapError JQError ))
+    |> Result.map (jqToJv)
+    |> Result.iter (jsonToString >> List.iter printColored)
 
     0
 (*printfn "%A" objec*)

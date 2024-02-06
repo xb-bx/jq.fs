@@ -8,6 +8,7 @@
   <ItemGroup>
     <Compile Include="JSON.fs" />
     <Compile Include="JQ.fs" />
+    <Compile Include="JQParser.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
