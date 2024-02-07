@@ -100,7 +100,9 @@ let main args =
     let jobj = res |> parserResultToResult |> Result.defaultValue (JNull)
 
     printfn ""
-
+    let dump s = 
+        printfn "%A" s 
+        s
     run expression args[0]
     |> parserResultToResult 
     |> Result.bind (fun selec -> (evaluateExpression selec jobj |> Result.mapError JQError ))

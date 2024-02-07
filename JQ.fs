@@ -20,6 +20,7 @@ type Selector =
 type Expression =
     | SelectorExpression of Selector
     | AssignmentExpression of Selector * Expression
+    | UpdateAssignmentExpression of Selector * Expression
     | NumberExpression of double
     | StringExpression of string
     | ObjectExpression of Map<string, Expression>
@@ -111,14 +112,14 @@ let setProp prop objk value =
     | JObject fields -> Map.add prop value fields |> JObject |> Result.Ok
     | _ -> typeMismatchErr "object" objk
 
-let jqMap (fmap: JValue -> JValue) jq =
+let jqMap (fmap: JValue -> Result<JValue, JQError>) jq =
     match jq with
-    | Single j -> fmap j |> Single
-    | Many js -> List.map fmap js |> Many
+    | Single j -> fmap j |> Result.map Single
+    | Many js -> List.map fmap js |> listOfResults2ResultOfList |> Result.map Many
 
-let rec mapBySelector (fmap: JValue -> JValue) selector jv : Result<JQValue, JQError> =
+let rec mapBySelector (fmap: JValue -> Result<JValue, JQError>) selector jv : Result<JQValue, JQError> =
     match selector with
-    | Root -> jv |> jqMap fmap |> Result.Ok
+    | Root -> jv |> jqMap fmap 
     | ArrayElement(elem, next) ->
         result {
             let! arr = evaluateSelector next jv
@@ -126,8 +127,9 @@ let rec mapBySelector (fmap: JValue -> JValue) selector jv : Result<JQValue, JQE
             let! newArr =
                 match arr with
                 | Single arr ->
-                    setItem elem arr (fmap (getItemOrNull elem arr))
-                    |> Result.bind (fun newObj -> mapBySelector (fun _ -> newObj) next jv)
+                    fmap (getItemOrNull elem arr)
+                    |> Result.bind (setItem elem arr)
+                    |> Result.bind (fun newObj -> mapBySelector (fun _ -> newObj |> Result.Ok) next jv)
                 | Many _ -> unreachable ()
 
             return newArr
@@ -139,8 +141,9 @@ let rec mapBySelector (fmap: JValue -> JValue) selector jv : Result<JQValue, JQE
             let! res =
                 match obj with
                 | Single jobj ->
-                    setProp property jobj (fmap (getPropOrNull property jobj))
-                    |> Result.bind (fun newObj -> mapBySelector (fun _ -> newObj) next jv)
+                    fmap (getPropOrNull property jobj)
+                    |> Result.bind (setProp property jobj)
+                    |> Result.bind (fun newObj -> mapBySelector (fun _ -> newObj |> Result.Ok) next jv)
                 | Many _ -> unreachable ()
 
             return res
@@ -161,7 +164,7 @@ let rec mapBySelector (fmap: JValue -> JValue) selector jv : Result<JQValue, JQE
                 | _ -> typeMismatchErr "array" jv
 
             let! newArr = mapArray fmap arr
-            let! newArr = mapBySelector (fun _ -> newArr) from jv
+            let! newArr = mapBySelector (fun _ -> newArr |> Result.Ok) from jv
             return newArr
         }
 
@@ -226,7 +229,10 @@ let rec evaluateExpression expression value =
         evaluateSelector selectr (Single value) |> Result.map (jqToJv)
     | AssignmentExpression (selectr, expression) ->
         evaluateExpression expression value
-        |> Result.bind(fun x -> mapBySelector (fun _ -> x) selectr (Single value))
+        |> Result.bind(fun x -> mapBySelector (fun _ -> x |> Result.Ok) selectr (Single value))
+        |> Result.map jqToJv
+    | UpdateAssignmentExpression (selectr, expression)  -> 
+        mapBySelector (fun v -> evaluateExpression expression v) selectr (Single value)
         |> Result.map jqToJv
     | ArrayExpression exprs ->
         exprs 

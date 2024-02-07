@@ -38,7 +38,7 @@ selectorRef.Value <-
         let! _ = word "."
         let current = Root
         let! parsed = sepBy (choice [ identifierWithIndexer current; selectFromArray current; arrayElement current;  ]) (pchar '.')
-        return (parsed.Tail |> List.fold setFrom parsed.Head)
+        return if parsed.Length = 0 then current else if parsed.Length = 1 then parsed.Head else (parsed.Tail |> List.fold setFrom parsed.Head)
     }
 let expression, expressionRef = createParserForwardedToRef()
 
@@ -60,6 +60,13 @@ let objectExpression =
     |>> Map.ofSeq
     |>> ObjectExpression
 
+let updateAssignmentExpression = 
+    parse {
+        let! selectr = selector
+        let! _ = word "|="
+        let! value = expression
+        return UpdateAssignmentExpression(selectr, value)
+    }
 let assignmentExpression = 
     parse {
         let! selectr = selector
@@ -67,5 +74,5 @@ let assignmentExpression =
         let! value = expression
         return AssignmentExpression(selectr, value)
     }
-expressionRef.Value <- choice [attempt assignmentExpression; attempt selectorExpression; attempt arrayExpression; attempt objectExpression; attempt stringExpression; attempt numberExpression]
+expressionRef.Value <- choice [attempt assignmentExpression; attempt updateAssignmentExpression; attempt selectorExpression; attempt arrayExpression; attempt objectExpression; attempt stringExpression; attempt numberExpression]
 
