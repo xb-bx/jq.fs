@@ -92,19 +92,19 @@ let parserResultToResult pr =
 let main args =
     let str = System.Console.In.ReadToEnd()
     let res = run jvalue str
-
+    let printJson =
+        jsonToString >> List.iter printColored
     res
     |> parserResultToResult
-    |> Result.iter (jsonToString >> (List.iter printColored))
+    |> Result.iter printJson
     let jobj = res |> parserResultToResult |> Result.defaultValue (JNull)
 
     printfn ""
 
-    run selector args[0]
+    run expression args[0]
     |> parserResultToResult 
-    |> Result.bind (fun selec -> (evaluateSelector selec (Single jobj) |> Result.mapError JQError ))
-    |> Result.map (jqToJv)
-    |> Result.iter (jsonToString >> List.iter printColored)
+    |> Result.bind (fun selec -> (evaluateExpression selec jobj |> Result.mapError JQError ))
+    |> Result.iter printJson
 
     0
 (*printfn "%A" objec*)

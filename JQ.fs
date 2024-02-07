@@ -20,6 +20,11 @@ type Selector =
 type Expression =
     | SelectorExpression of Selector
     | AssignmentExpression of Selector * Expression
+    | NumberExpression of double
+    | StringExpression of string
+    | ObjectExpression of Map<string, Expression>
+    | ArrayExpression of Expression list
+    
 
 type JQError =
     | TypeMismatch of string * string
@@ -46,6 +51,13 @@ let listOfResults2ResultOfList (results: Result<'a, 'c> list) : Result<'a list, 
         | Result.Error(v) :: _ -> Result.Error(v)
 
     loop results []
+let mapOfResults2ResultOfMap (results: Map<'k, Result<'v, 'e>>): Result<Map<'k,'v>, 'e> =
+    results |> Map.toList |> List.map (fun (k,v) -> Result.map (fun x -> (k,x)) v)
+    |> listOfResults2ResultOfList |> Result.map Map.ofList
+
+
+
+
 
 type JQValue =
     | Single of JValue
@@ -205,3 +217,22 @@ and evaluateSelector selector jv : Result<JQValue, JQError> =
                 | Many _ -> unreachable ()
             return! value
         }
+
+let rec evaluateExpression expression value = 
+    match expression with
+    | NumberExpression num -> num |> JNumber |> Result.Ok
+    | StringExpression str -> str |> JString |> Result.Ok
+    | SelectorExpression selectr -> 
+        evaluateSelector selectr (Single value) |> Result.map (jqToJv)
+    | AssignmentExpression (selectr, expression) ->
+        evaluateExpression expression value
+        |> Result.bind(fun x -> mapBySelector (fun _ -> x) selectr (Single value))
+        |> Result.map jqToJv
+    | ArrayExpression exprs ->
+        exprs 
+        |> List.map (fun expr -> evaluateExpression expr value)
+        |> listOfResults2ResultOfList
+        |> Result.map JArray
+    | ObjectExpression fields -> 
+        fields |> Map.map (fun k v -> evaluateExpression v value) |> mapOfResults2ResultOfMap |> Result.map JObject 
+

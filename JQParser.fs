@@ -1,4 +1,5 @@
 module JQParser
+
 open FParsec
 open JSON
 open JQ
@@ -11,9 +12,12 @@ let selectFromArray from =
         let! selectr = opt selector |>> Option.defaultValue Root
         return SelectFromArray(from, selectr)
     }
+let parseId = 
+    ws >>. identifier (IdentifierOptions()) .>> ws
+    
 let identifierWithIndexer previous = 
     parse {
-        let! ident = identifier (IdentifierOptions()) 
+        let! ident = parseId
         let res = Identifier (ident, previous)
         let! indexers = opt (choice [
             selectFromArray res;
@@ -31,11 +35,37 @@ let setFrom value selec =
     | SelectFromArray(_, s) -> SelectFromArray(value, s)
 selectorRef.Value <- 
     parse {
-        let! _ = pchar '.'
+        let! _ = word "."
         let current = Root
         let! parsed = sepBy (choice [ identifierWithIndexer current; selectFromArray current; arrayElement current;  ]) (pchar '.')
-        return (parsed |> List.fold setFrom current)
-        (*return current*)
+        return (parsed.Tail |> List.fold setFrom parsed.Head)
     }
+let expression, expressionRef = createParserForwardedToRef()
 
+let numberExpression = 
+    numberLiteral NumberLiteralOptions.DefaultFloat "number"
+    |>> (fun x -> x.String |> System.Double.Parse)
+    |>> NumberExpression
+let stringExpression = 
+    pString |>> StringExpression
+let selectorExpression = 
+    selector |>> SelectorExpression
+let arrayExpression = 
+    word "[" >>. sepBy expression (word ",") .>> word "]"
+    |>> ArrayExpression
+let objectField = 
+    parseId .>> word ":" .>>. expression
+let objectExpression = 
+    word "{" >>. sepBy objectField (word ",") .>> word "}" 
+    |>> Map.ofSeq
+    |>> ObjectExpression
+
+let assignmentExpression = 
+    parse {
+        let! selectr = selector
+        let! _ = word "="
+        let! value = expression
+        return AssignmentExpression(selectr, value)
+    }
+expressionRef.Value <- choice [attempt assignmentExpression; attempt selectorExpression; attempt arrayExpression; attempt objectExpression; attempt stringExpression; attempt numberExpression]
 
