@@ -245,27 +245,22 @@ let apply op =
 
 let rec evaluateExpression expression value = 
     match expression with
-    | NumberExpression num -> num |> JNumber |> Result.Ok
-    | StringExpression str -> str |> JString |> Result.Ok
+    | NumberExpression num -> num |> JNumber |> Single |> Result.Ok
+    | StringExpression str -> str |> JString |> Single |> Result.Ok
     | SelectorExpression selectr -> 
-        evaluateSelector selectr (Single value) |> Result.map (jqToJv)
+        evaluateSelector selectr (Single value) 
     | AssignmentExpression (selectr, expression) ->
         evaluateExpression expression value
-        |> Result.bind(fun x -> mapBySelector (fun _ -> x |> Result.Ok) selectr (Single value))
-        |> Result.map jqToJv
+        |> Result.bind(fun x -> mapBySelector (fun _ -> x |> jqToJv |> Result.Ok) selectr (Single value))
     | UpdateAssignmentExpression (selectr, expression)  -> 
-        mapBySelector (fun v -> evaluateExpression expression v) selectr (Single value)
-        |> Result.map jqToJv
+        mapBySelector (fun v -> evaluateExpression expression v |> Result.map jqToJv) selectr (Single value)
     | OperatorAssignExpression(op, selectr, expression)  -> 
-        mapBySelector (fun v -> evaluateExpression expression v |> Result.bind (apply op v)) selectr (Single value)
-        |> Result.map jqToJv
-    
-
+        mapBySelector (fun v -> evaluateExpression expression v |> Result.bind (fun expr -> expr |> jqToJv |> apply op v )) selectr (Single value)
     | ArrayExpression exprs ->
         exprs 
         |> List.map (fun expr -> evaluateExpression expr value)
         |> listOfResults2ResultOfList
-        |> Result.map JArray
+        |> Result.map (List.map jqToJv >> JArray >> Single)
     | ObjectExpression fields -> 
-        fields |> Map.map (fun k v -> evaluateExpression v value) |> mapOfResults2ResultOfMap |> Result.map JObject 
+        fields |> Map.map (fun _ v -> evaluateExpression v value) |> mapOfResults2ResultOfMap |> Result.map (Map.map (fun _ v -> jqToJv v)) |> Result.map (JObject >> Single)
 

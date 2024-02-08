@@ -93,14 +93,12 @@ type CliArgument =
     | [<AltCommandLine("-r")>] Raw_Output
     | [<AltCommandLine("-f")>] File of path:string 
     | [<MainCommand; Last>] Filter of filter:string
-    (*| Help *)
     interface IArgParserTemplate with
         member s.Usage = 
             match s with 
             | Raw_Output -> "raw output"
             | File _ -> "read from file instead of stdin"
             | Filter _ -> "filter" 
-            (*| Help -> "help"*)
 
 [<EntryPoint>]
 let main args =
@@ -113,22 +111,28 @@ let main args =
         | :? Argu.ArguParseException as e when e.ErrorCode = ErrorCode.HelpText -> 
             parser.PrintUsage() |> printfn "%s" 
             exit 0
-
+    let jqValueToString jq =
+        match jq with 
+        | Single jv -> jsonToString jv
+        | Many jvs -> jvs |> List.map jsonToString |> List.map (fun xs -> List.append xs ["\n", None]) |> List.concat
+    let isString jv = 
+        match jv with | JString _ -> true | _ -> false
     let printJson = 
         if args.Contains Raw_Output then 
             fun j ->
                 match j with 
-                    | JString s -> printfn "%s" s
-                    | _ -> jsonToString j |> List.iter printColored
+                    | Single(JString s) -> printfn "%s" s
+                    | Many vals when (vals |> List.forall isString) -> vals |> List.iter (function JString s -> printfn "%s" s)
+                    | _ -> jqValueToString j |> List.iter printColored
         else 
-            jsonToString >> List.iter printColored
+            jqValueToString >> List.iter printColored
             
     let input = args.TryGetResult File |> Option.filter System.IO.File.Exists |> Option.map System.IO.File.ReadAllText |> Option.defaultWith Console.In.ReadToEnd
     let filter = args.TryGetResult Filter
     match run jvalue input |> parserResultToResult with 
     | Result.Ok(jvalue) ->
         if filter.IsNone then 
-            printJson jvalue
+            printJson (Single jvalue)
         else 
             let res = 
                 run expression filter.Value
