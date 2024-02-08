@@ -60,6 +60,21 @@ let objectExpression =
     |>> Map.ofSeq
     |>> ObjectExpression
 
+    
+let opAssignExpression = 
+    parse {
+        let! selectr = selector
+        let! op = choice [word "+="; word "-="; word "*="; word "/="]
+        let op =
+            match op with 
+            | "+=" -> Add
+            | "-=" -> Substract
+            | "*=" -> Multiply
+            | "/=" -> Div
+            | _ -> raise(new System.Exception("Will not happen"))
+        let! value = expression
+        return OperatorAssignExpression(op, selectr, value)
+    }
 let updateAssignmentExpression = 
     parse {
         let! selectr = selector
@@ -74,5 +89,4 @@ let assignmentExpression =
         let! value = expression
         return AssignmentExpression(selectr, value)
     }
-expressionRef.Value <- choice [attempt assignmentExpression; attempt updateAssignmentExpression; attempt selectorExpression; attempt arrayExpression; attempt objectExpression; attempt stringExpression; attempt numberExpression]
-
+expressionRef.Value <- choice([attempt assignmentExpression; attempt updateAssignmentExpression; attempt opAssignExpression; attempt selectorExpression; attempt arrayExpression; attempt objectExpression; attempt stringExpression; attempt numberExpression]) 

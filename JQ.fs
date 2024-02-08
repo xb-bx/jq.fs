@@ -16,10 +16,11 @@ type Selector =
     | ArrayElement of int * Selector
     | SelectFromArray of Selector * Selector
     | Root
-
+type Op = Add | Substract | Multiply | Div
 type Expression =
     | SelectorExpression of Selector
     | AssignmentExpression of Selector * Expression
+    | OperatorAssignExpression of Op * Selector * Expression
     | UpdateAssignmentExpression of Selector * Expression
     | NumberExpression of double
     | StringExpression of string
@@ -31,6 +32,7 @@ type JQError =
     | TypeMismatch of string * string
     | PropertyNotFound of string
     | IndexOutOfBounds of int
+    | InvalidOperands of JValue * JValue * Op
 
 let typeMismatch got expected = TypeMismatch(got, expected)
 
@@ -220,6 +222,26 @@ and evaluateSelector selector jv : Result<JQValue, JQError> =
                 | Many _ -> unreachable ()
             return! value
         }
+let add left right = 
+    match (left, right) with 
+    | (JNumber n1, JNumber n2) -> (JNumber (n1 + n2))  |> Result.Ok
+    | (JString s1, JString s2) -> s1 + s2 |> JString |> Result.Ok
+    | (JArray a1, JArray a2) -> [a1; a2] |> List.concat |> JArray |> Result.Ok
+    | (JObject o1, JObject o2) -> 
+        o1 |> Map.map (fun k v -> o2 |> Map.tryFind k |> Option.defaultValue v) |> JObject |> Result.Ok
+    | _ -> (left, right, Add) |> InvalidOperands |> Result.Error
+
+let sub left right = 
+    match (left, right) with 
+    | (JNumber n1, JNumber n2) -> (JNumber (n1 - n2))  |> Result.Ok
+    | (JArray a1, JArray a2) -> a1 |> List.filter (fun v -> not (a2 |> List.contains v)) |> JArray |> Result.Ok
+    | _ -> (left, right, Substract) |> InvalidOperands |> Result.Error
+let apply op = 
+    match op with 
+    | Add -> add 
+    | Substract -> sub 
+    | _ -> raise (new System.NotImplementedException())
+
 
 let rec evaluateExpression expression value = 
     match expression with
@@ -234,6 +256,11 @@ let rec evaluateExpression expression value =
     | UpdateAssignmentExpression (selectr, expression)  -> 
         mapBySelector (fun v -> evaluateExpression expression v) selectr (Single value)
         |> Result.map jqToJv
+    | OperatorAssignExpression(op, selectr, expression)  -> 
+        mapBySelector (fun v -> evaluateExpression expression v |> Result.bind (apply op v)) selectr (Single value)
+        |> Result.map jqToJv
+    
+
     | ArrayExpression exprs ->
         exprs 
         |> List.map (fun expr -> evaluateExpression expr value)
