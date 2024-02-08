@@ -1,5 +1,6 @@
 ﻿module JQMain
 
+open Argu
 open FParsec
 open System
 open JSON
@@ -88,25 +89,60 @@ let parserResultToResult pr =
     | Success(x, _, _) -> Result.Ok x
     | Failure(_, p, _) -> p |> JsonError |> Result.Error
 
+type CliArgument = 
+    | [<AltCommandLine("-r")>] Raw_Output
+    | [<AltCommandLine("-f")>] File of path:string 
+    | [<MainCommand; Last>] Filter of filter:string
+    (*| Help *)
+    interface IArgParserTemplate with
+        member s.Usage = 
+            match s with 
+            | Raw_Output -> "raw output"
+            | File _ -> "read from file instead of stdin"
+            | Filter _ -> "filter" 
+            (*| Help -> "help"*)
+
 [<EntryPoint>]
 let main args =
-    let str = System.Console.In.ReadToEnd()
-    let res = run jvalue str
-    let printJson =
-        jsonToString >> List.iter printColored
-    res
-    |> parserResultToResult
-    |> Result.iter printJson
-    let jobj = res |> parserResultToResult |> Result.defaultValue (JNull)
+    let parser = ArgumentParser.Create<CliArgument>()
 
-    printfn ""
-    let dump s = 
-        printfn "%A" s 
-        s
-    run expression args[0]
-    |> parserResultToResult 
-    |> Result.bind (fun selec -> (evaluateExpression selec jobj |> Result.mapError JQError ))
-    |> Result.iter printJson
+    let args = 
+        try 
+            parser.Parse()
+        with
+        | :? Argu.ArguParseException as e when e.ErrorCode = ErrorCode.HelpText -> 
+            parser.PrintUsage() |> printfn "%s" 
+            exit 0
+
+    let printJson = 
+        if args.Contains Raw_Output then 
+            fun j ->
+                match j with 
+                    | JString s -> printfn "%s" s
+                    | _ -> jsonToString j |> List.iter printColored
+        else 
+            jsonToString >> List.iter printColored
+            
+    let input = args.TryGetResult File |> Option.filter System.IO.File.Exists |> Option.map System.IO.File.ReadAllText |> Option.defaultWith Console.In.ReadToEnd
+    let filter = args.TryGetResult Filter
+    match run jvalue input |> parserResultToResult with 
+    | Result.Ok(jvalue) ->
+        if filter.IsNone then 
+            printJson jvalue
+        else 
+            let res = 
+                run expression filter.Value
+                    |> parserResultToResult 
+                    |> Result.bind (fun selec -> (evaluateExpression selec jvalue |> Result.mapError JQError ))
+            match res with 
+            | Result.Ok(jvalue) -> printJson jvalue
+            | Result.Error(err) -> 
+                eprintfn "%A" err
+                exit 1
+            
+    | Result.Error(error) -> 
+        eprintfn "%A" error 
+        exit 1
 
     0
 (*printfn "%A" objec*)
